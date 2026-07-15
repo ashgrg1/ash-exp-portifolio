@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ash Exp — Holdings Ledger</title>
+<style>
+  :root{
+    --paper:#F4F6F3;
+    --ink:#13312A;
+    --ink-soft:#4E6159;
+    --brass:#A2792C;
+    --gain:#1E7A4C;
+    --loss:#B33F2D;
+    --rule:#D8DED7;
+    --card:#FFFFFF;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+       max-width:520px;margin:0 auto;padding:20px 18px 40px}
+
+  /* Masthead */
+  .masthead{display:flex;justify-content:space-between;align-items:baseline;
+            border-bottom:2px solid var(--ink);padding-bottom:10px}
+  .masthead h1{font-family:var(--serif);font-size:17px;letter-spacing:.14em;font-weight:600}
+  .masthead .stamp{font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);text-align:right}
+
+  /* Hero */
+  .hero{padding:26px 0 6px;text-align:left}
+  .hero .label{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--brass);font-weight:600}
+  .hero .total{font-family:var(--mono);font-size:44px;font-weight:600;
+               font-variant-numeric:tabular-nums;line-height:1.15;margin-top:4px}
+  .hero .chg{font-family:var(--mono);font-size:14px;margin-top:2px}
+  .chg.up{color:var(--gain)} .chg.down{color:var(--loss)} .chg.flat{color:var(--ink-soft)}
+
+  /* Allocation rule (signature) */
+  .alloc{margin:22px 0 8px}
+  .alloc-bar{display:flex;height:14px;border:1px solid var(--ink);overflow:hidden;background:var(--card)}
+  .alloc-bar span{display:block;height:100%}
+  .alloc-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px}
+  .alloc-legend .item{font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);display:flex;align-items:center;gap:5px}
+  .alloc-legend .swatch{width:8px;height:8px;display:inline-block}
+
+  /* Positions ledger */
+  .ledger{margin-top:22px;background:var(--card);border:1px solid var(--rule);padding:4px 14px}
+  .row{display:flex;align-items:baseline;gap:8px;padding:13px 0;border-bottom:1px solid var(--rule)}
+  .row:last-child{border-bottom:none}
+  .tk{font-family:var(--serif);font-weight:700;font-size:16px;min-width:52px}
+  .meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);flex-shrink:0}
+  .leader{flex:1;border-bottom:1px dotted var(--rule);transform:translateY(-4px)}
+  .val{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:600;text-align:right}
+  .sub{font-family:var(--mono);font-size:10.5px;text-align:right}
+  .valwrap{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .row input{font-family:var(--mono);font-size:13px;width:96px;padding:4px 6px;
+             border:1px solid var(--brass);background:var(--paper);color:var(--ink)}
+
+  /* Controls */
+  .controls{display:flex;gap:10px;margin-top:16px}
+  button{font-family:var(--sans);font-size:13px;font-weight:600;padding:10px 16px;
+         border:1.5px solid var(--ink);background:var(--ink);color:var(--paper);cursor:pointer}
+  button.quiet{background:transparent;color:var(--ink)}
+  button:disabled{opacity:.5;cursor:default}
+  button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+
+  .note{margin-top:14px;font-size:11.5px;color:var(--ink-soft);line-height:1.5}
+  .status{font-family:var(--mono);font-size:11px;color:var(--brass);margin-top:10px;min-height:14px}
+  .footline{margin-top:26px;border-top:2px solid var(--ink);padding-top:8px;
+            font-family:var(--mono);font-size:10px;color:var(--ink-soft);letter-spacing:.06em}
+  @media (prefers-reduced-motion:no-preference){
+    .total{transition:opacity .3s}
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <h1>ASH EXP · LEDGER</h1>
+  <div class="stamp">ROBINHOOD BROKERAGE<br><span id="stampDate">—</span></div>
+</header>
+
+<section class="hero">
+  <div class="label">Portfolio value</div>
+  <div class="total" id="total">$—</div>
+  <div class="chg flat" id="dayChg">—</div>
+</section>
+
+<section class="alloc">
+  <div class="alloc-bar" id="allocBar" aria-label="Allocation by holding"></div>
+  <div class="alloc-legend" id="allocLegend"></div>
+</section>
+
+<section class="ledger" id="ledger" aria-live="polite"></section>
+
+<div class="controls">
+  <button id="refreshBtn">Refresh prices</button>
+  <button id="editBtn" class="quiet">Edit shares</button>
+  <button id="driveBtn" class="quiet">Save to Sheets</button>
+</div>
+<div class="status" id="status"></div>
+
+<p class="note">Recurring: <strong>$10 → VTI every week.</strong> Share counts are stored on this device — tap <em>Edit shares</em> after each buy to keep the ledger true.</p>
+
+<div class="footline">PRICES VIA LIVE WEB SEARCH · MAY BE DELAYED · NOT INVESTMENT ADVICE</div>
+
+<script>
+const COLORS = { VTI:'#13312A', VEA:'#3E6B5A', BND:'#A2792C', VWO:'#C9A45C', AAPL:'#6E8B7F', NVDA:'#B33F2D' };
+const ORDER  = ['VTI','VEA','BND','VWO','AAPL','NVDA'];
+
+// Fallbacks from Ash's 7/13/2026 screenshots
+const DEFAULTS = {
+  holdings: { VTI:0.180001, VWO:0.133188, VEA:1.31, BND:1.50, NVDA:0.023739, AAPL:0.033333 },
+  prices:   { VTI:{price:370.12,changePct:0}, VWO:{price:58.84,changePct:0}, VEA:{price:69.81,changePct:0},
+              BND:{price:72.52,changePct:0}, NVDA:{price:204.04,changePct:0}, AAPL:{price:317.20,changePct:0} },
+  updatedAt: '2026-07-13T18:53:00Z'
+};
+
+let state = JSON.parse(JSON.stringify(DEFAULTS));
+let editing = false;
+
+const $ = id => document.getElementById(id);
+const fmt$ = n => '$' + n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtPct = n => (n>0?'+':'') + n.toFixed(2) + '%';
+
+function totalValue(){ return ORDER.reduce((s,t)=> s + state.holdings[t]*state.prices[t].price, 0); }
+
+function render(){
+  const tot = totalValue();
+  $('total').textContent = fmt$(tot);
+
+  // weighted day change
+  let chgDollars = 0, haveChg = false;
+  ORDER.forEach(t=>{
+    const p = state.prices[t];
+    if(typeof p.changePct === 'number' && p.changePct !== 0) haveChg = true;
+    const prev = p.price / (1 + (p.changePct||0)/100);
+    chgDollars += state.holdings[t] * (p.price - prev);
+  });
+  const chgPct = tot ? (chgDollars/(tot-chgDollars))*100 : 0;
+  const el = $('dayChg');
+  if(haveChg){
+    el.textContent = (chgDollars>=0?'+':'−') + '$' + Math.abs(chgDollars).toFixed(2) + ' (' + fmtPct(chgPct) + ') today';
+    el.className = 'chg ' + (chgDollars>0.001?'up':chgDollars<-0.001?'down':'flat');
+  } else { el.textContent = 'day change appears after refresh'; el.className='chg flat'; }
+
+  // stamp
+  const d = new Date(state.updatedAt);
+  $('stampDate').textContent = 'AS OF ' + d.toLocaleDateString('en-US',{month:'short',day:'numeric'}).toUpperCase()
+      + ' ' + d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+
+  // allocation bar + legend
+  const bar = $('allocBar'), leg = $('allocLegend');
+  bar.innerHTML=''; leg.innerHTML='';
+  ORDER.forEach(t=>{
+    const v = state.holdings[t]*state.prices[t].price;
+    const pct = tot? (v/tot*100):0;
+    const seg = document.createElement('span');
+    seg.style.width = pct+'%'; seg.style.background = COLORS[t]; seg.title = t+' '+pct.toFixed(1)+'%';
+    bar.appendChild(seg);
+    const item = document.createElement('span');
+    item.className='item';
+    item.innerHTML = '<span class="swatch" style="background:'+COLORS[t]+'"></span>'+t+' '+pct.toFixed(1)+'%';
+    leg.appendChild(item);
+  });
+
+  // ledger rows
+  const ledger = $('ledger'); ledger.innerHTML='';
+  ORDER.forEach(t=>{
+    const p = state.prices[t], sh = state.holdings[t], v = sh*p.price;
+    const row = document.createElement('div'); row.className='row';
+    const chgCls = p.changePct>0.001?'up':p.changePct<-0.001?'down':'flat';
+    row.innerHTML =
+      '<span class="tk">'+t+'</span>' +
+      (editing
+        ? '<input inputmode="decimal" data-tk="'+t+'" value="'+sh+'" aria-label="'+t+' shares">'
+        : '<span class="meta">'+sh+' sh · '+fmt$(p.price)+'</span>') +
+      '<span class="leader"></span>' +
+      '<span class="valwrap"><span class="val">'+fmt$(v)+'</span>' +
+      '<span class="sub chg '+chgCls+'">'+ (p.changePct? fmtPct(p.changePct):'—') +'</span></span>';
+    ledger.appendChild(row);
+  });
+}
+
+async function save(){
+  try{ await window.storage.set('ashexp-portfolio', JSON.stringify(state)); }
+  catch(e){ console.error('save failed', e); }
+}
+
+async function load(){
+  try{
+    const r = await window.storage.get('ashexp-portfolio');
+    if(r && r.value){
+      const saved = JSON.parse(r.value);
+      state = { ...JSON.parse(JSON.stringify(DEFAULTS)), ...saved };
+    }
+  }catch(e){ /* first run — defaults are fine */ }
+  render();
+}
+
+async function refreshPrices(){
+  const btn = $('refreshBtn'); btn.disabled = true;
+  $('status').textContent = 'Searching live prices…';
+  try{
+    const resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6', max_tokens:1000,
+        tools:[{type:'web_search_20250305', name:'web_search'}],
+        messages:[{role:'user', content:
+          "Search the web for the CURRENT stock/ETF price and today's percent change for these tickers: VTI, VWO, VEA, BND, NVDA, AAPL. " +
+          "Then respond with ONLY a raw JSON object, no markdown, no backticks, no explanation, exactly in this shape: " +
+          '{"VTI":{"price":123.45,"changePct":-0.52},"VWO":{"price":0,"changePct":0},"VEA":{"price":0,"changePct":0},"BND":{"price":0,"changePct":0},"NVDA":{"price":0,"changePct":0},"AAPL":{"price":0,"changePct":0}}. ' +
+          "Prices in USD as numbers. changePct is today's percent change as a number."}]
+      })
+    });
+    const data = await resp.json();
+    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const m = text.match(/\{[\s\S]*\}/);
+    if(!m) throw new Error('No JSON in response');
+    const parsed = JSON.parse(m[0]);
+    ORDER.forEach(t=>{
+      if(parsed[t] && typeof parsed[t].price==='number'){
+        state.prices[t] = { price: parsed[t].price, changePct: Number(parsed[t].changePct)||0 };
+      }
+    });
+    state.updatedAt = new Date().toISOString();
+    await save(); render();
+    $('status').textContent = 'Updated just now.';
+  }catch(err){
+    console.error(err);
+    const d = new Date(state.updatedAt);
+    $('status').textContent = 'Live fetch failed — showing prices from ' +
+      d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + '. Tap refresh to retry.';
+  }finally{ btn.disabled=false; }
+}
+
+function toggleEdit(){
+  if(editing){
+    document.querySelectorAll('#ledger input').forEach(inp=>{
+      const v = parseFloat(inp.value);
+      if(!isNaN(v) && v>=0) state.holdings[inp.dataset.tk] = v;
+    });
+    editing=false; $('editBtn').textContent='Edit shares';
+    save(); render();
+    $('status').textContent='Share counts saved.';
+  }else{
+    editing=true; $('editBtn').textContent='Save shares';
+    render();
+  }
+}
+
+async function saveToDrive(){
+  const btn = $('driveBtn'); btn.disabled = true;
+  $('status').textContent = 'Saving snapshot to Google Drive…';
+  const tot = totalValue();
+  const today = new Date().toISOString().slice(0,10);
+  const header = 'Date,TotalValue,' + ORDER.join(',');
+  const row = [today, tot.toFixed(2),
+               ...ORDER.map(t => (state.holdings[t]*state.prices[t].price).toFixed(2))].join(',');
+  try{
+    const resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6', max_tokens:1000,
+        mcp_servers:[{type:'url', url:'https://drivemcp.googleapis.com/mcp/v1', name:'gdrive'}],
+        messages:[{role:'user', content:
+          'You have Google Drive tools. Step 1: search Drive for a file named "Ash Exp Portfolio Log". ' +
+          'Step 2: if one exists, read its full CSV content. ' +
+          'Step 3: create a plain-text CSV file in Drive named "Ash Exp Portfolio Log.csv" containing the existing rows ' +
+          'plus this new row appended at the end: ' + row + ' . ' +
+          'If no existing file was found, start the content with this header line: ' + header + ' . ' +
+          'Never duplicate the header, never drop existing rows. When finished, reply with only the word SAVED.'}]
+      })
+    });
+    const data = await resp.json();
+    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join(' ');
+    if(/SAVED/i.test(text)){
+      $('status').textContent = 'Snapshot saved to Drive — open "Ash Exp Portfolio Log" with Google Sheets.';
+    } else {
+      throw new Error('Unexpected reply: ' + text.slice(0,120));
+    }
+  }catch(err){
+    console.error(err);
+    $('status').textContent = 'Drive save failed — check the Google Drive connection and try again.';
+  }finally{ btn.disabled = false; }
+}
+
+$('refreshBtn').addEventListener('click', refreshPrices);
+$('editBtn').addEventListener('click', toggleEdit);
+$('driveBtn').addEventListener('click', saveToDrive);
+
+(async ()=>{ await load(); refreshPrices(); })();
+</script>
+</body>
+</html>
